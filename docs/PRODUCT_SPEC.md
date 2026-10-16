@@ -17,8 +17,9 @@ A private, ad-free, expandable study platform inspired by useful parts of Quizle
 
 - One learner account, intended for Zero; owner manages setup and content.
 - No public registration, public profiles, public sets, or ads.
-- The current prototype uses sample data only.
-- Do not store real study data remotely until privacy, access controls, backup/export, and cost risks have been reviewed.
+- The app now supports authenticated Supabase cloud sync for the single learner account, while retaining local browser persistence and JSON export.
+- The `study_user_data` table has Row Level Security policies that limit reads/writes to the signed-in owner. Public/anonymous table access is revoked.
+- Do not put real learner data in the app until the sign-in and sync flow has been tested end to end.
 - Never expose service-role keys or secrets in browser code or Git.
 
 ## Library and organization
@@ -123,7 +124,7 @@ If a backend is considered in the future, first review current pricing, billing 
 - Flashcards and basic quiz work across card types.
 - View progress; definition edits preserve progress.
 - Usable on mobile and desktop.
-- Keep real data local until persistence, export/backup, and security are implemented and tested.
+- Cloud persistence, local fallback, and RLS policies are implemented; verify sign-in, first sync, cross-device sync, sign-out, and backup restore before treating it as production-ready.
 
 
 ## Implementation status (2026-10-16)
@@ -144,3 +145,13 @@ Not yet release-ready:
 - The current app stores data only in the browser's localStorage. It is not yet safe to deploy publicly with private learner data.
 
 Cost rule: use free local tools wherever possible. If a step may incur a charge, stop and choose a free alternative rather than knowingly proceeding.
+
+
+## Supabase connection status (2026-10-16)
+
+- Dedicated existing project: `Study-App` (project ref `dkzpcqoczhefinrojelp`).
+- Browser client uses the project URL and publishable key only; no service-role key is shipped.
+- Table: `public.study_user_data`, one JSONB data record per authenticated user.
+- RLS is enabled; authenticated users can access only their own `user_id` row. Anonymous table privileges are revoked.
+- App sign-in uses email/password and intentionally does not expose a sign-up form. Create the learner account manually in Supabase Authentication → Users and disable public sign-ups in project Auth settings.
+- Not yet verified: production build, first sign-in, database round-trip, cross-device sync, and restore conflict behavior. The app should not be treated as production-ready until those checks pass.

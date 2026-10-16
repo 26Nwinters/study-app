@@ -1,16 +1,28 @@
 # Product Specification
 
 ## Product direction
+
 A private, ad-free, expandable study platform inspired by useful parts of Quizlet, without depending on Quizlet's API or scraping. It starts with medical terminology but must be general-purpose. The final app name is undecided.
 
+## Non-negotiable cost rule
+
+- Spending limit is **$0**.
+- Do not create cloud projects, hosting resources, paid trials, paid plans, or usage-based services.
+- Do not enable billing or upgrade a plan.
+- A quoted $0 creation cost is not proof that future use cannot incur charges.
+- If a proposed step has any possibility of causing a charge, stop and explain it before proceeding.
+- Develop and test locally for now. Cloud sync and remote hosting are deferred unless a genuinely no-charge approach can be established without billing risk.
+
 ## Users and privacy
-- One learner account, used by Zero; owner manages setup and content.
+
+- One learner account, intended for Zero; owner manages setup and content.
 - No public registration, public profiles, public sets, or ads.
-- Use a dedicated Supabase project, separate from unrelated projects.
-- Enforce ownership through Supabase Auth and row-level security (RLS), not only client-side UI.
+- The current prototype uses sample data only.
+- Do not store real study data remotely until privacy, access controls, backup/export, and cost risks have been reviewed.
 - Never expose service-role keys or secrets in browser code or Git.
 
 ## Library and organization
+
 Hierarchy: Library → Subject/Course → Study Set → Cards.
 Examples: Medical Terminology Chapters 1–12; English Vocabulary/Grammar; Algebra Formulas; Biology Exam Review.
 - Search/filter sets and cards; tags, archive, delete.
@@ -19,6 +31,7 @@ Examples: Medical Terminology Chapters 1–12; English Vocabulary/Grammar; Algeb
 - Card types: term/definition, question/answer, equation/solution, fill-in-the-blank, multi-step math, word parts, and custom long answers.
 
 ## Study modes
+
 1. Flashcards: flip, shuffle, previous/next, mark known/needs review.
 2. Learn: adaptive multiple choice, typed recall, spaced review.
 3. Match: pair terms and definitions.
@@ -27,15 +40,18 @@ Examples: Medical Terminology Chapters 1–12; English Vocabulary/Grammar; Algeb
 6. Word Builder: prefix, root, combining vowel, suffix, assembled meaning.
 7. Challenge: rounds, points, streaks.
 8. Progress & Review: missed cards, progress summaries, session history, review queue.
+
 Activities must adapt to card type; don't force multi-step math into a simple flashcard format.
 
 ## Import and export
+
 - Manual creation, paste text from sets the user owns, simple portable text export.
 - Photo/screenshot OCR and document import are later additions.
 - Clean pasted formatting and preserve pronunciation markers where practical.
 - Do not assume Quizlet AI access, a public API, or permission to scrape Quizlet.
 
 ### Import duplicate review
+
 - Classify candidates as **New**, **Duplicate**, or **Definition Changed**.
 - Normalize case, whitespace, harmless punctuation, and known pronunciation markers.
 - Flag similar-but-not-identical definitions for human review; don't auto-merge.
@@ -45,14 +61,16 @@ Activities must adapt to card type; don't force multi-step math into a simple fl
 - Show final summary and require confirmation.
 - Apply import transactionally.
 - Preserve study history when a definition changes.
-Prefer deterministic/local duplicate detection over AI to keep costs down.
+- Prefer deterministic/local duplicate detection over AI to keep costs down.
 
 ## Progress and review
+
 Per card: familiarity/mastery, correct/incorrect answers, last studied, next review time.
 Per set/subject: accuracy, completion, session history, missed cards, streaks, review queue and suggestions.
 Definition edits must not erase study history.
 
 ## Visual design and accessibility
+
 - Mature dark forest-inspired theme, not bright/minimalist.
 - Responsive on phones (including iPhone) and desktop/laptop (including Mac Neo).
 - Touch-friendly controls plus keyboard/mouse support.
@@ -60,31 +78,49 @@ Definition edits must not erase study history.
 - No ads; respect reduced-motion preferences and readable contrast.
 
 ## Cost and dependencies
-- Target $0/month initially where free tiers allow.
-- Verify current service limits.
+
 - Pin dependency versions and commit a lockfile once dependencies are installed.
 - No paid AI dependency for core workflows.
-- Browser OCR first; server-side AI vision is optional and later.
+- Prefer local deterministic algorithms.
+- Browser OCR is a possible later addition only if it does not require a paid service.
+- Review any new dependency or external service for cost, privacy, and billing implications before use.
 
 ## Suggested architecture
-React + Vite + CSS; Supabase Auth + Postgres; Cloudflare Pages; PWA/offline later.
-Use only a publishable Supabase key in the browser. Enable RLS on every exposed table with policies scoped to the authenticated owner.
+
+React + Vite + CSS. Keep data handling behind a small storage interface so the app can begin with local storage and be changed later if a genuinely safe backend option is approved. Cloud backend, hosted deployment, and PWA sync are deferred.
+
+If a backend is considered in the future, first review current pricing, billing controls, free-tier limits, data portability, authentication, and row-level security. Do not create a resource or enable billing under the current $0 rule.
 
 ## Delivery phases
-### Phase 1: Core
-Private login/session handling; library, subjects, sets, card creation and individual/bulk editing; manual/paste import with duplicate review; flashcards and basic configurable quiz; basic progress; responsive styling.
+
+### Phase 1: Local core
+- Library, subjects, sets, and card creation.
+- Individual and bulk editing.
+- Manual and paste import with duplicate review.
+- Flashcards and basic configurable quiz.
+- Basic progress.
+- Responsive styling and keyboard support.
+- Local persistence and export/backup.
+
 ### Phase 2: Smarter study
-Adaptive Learn, Write, Match; missed-card review and spaced repetition; tags, combined sessions, richer progress and review queue.
+- Adaptive Learn, Write, Match.
+- Missed-card review and spaced repetition.
+- Tags, combined sessions, richer progress and review queue.
+
 ### Phase 3: Specialized modes and import
-Word Builder, Challenge, photo/screenshot and document import, stronger math checking, diagrams/image labeling, audio/pronunciation, language support.
+- Word Builder, Challenge.
+- Photo/screenshot and document import if it can be done without paid services.
+- Stronger math checking, diagrams/image labeling, audio/pronunciation, language support.
+
 ### Future options
-Custom templates, more game modes, analytics, export/backup, optional affordable AI-assisted set creation.
+- Custom templates, more game modes, analytics, export/backup, optional AI-assisted set creation only if a genuinely no-cost option is available and the user approves it.
 
 ## First implementation acceptance criteria
+
 - Create subject, set, and cards.
 - Edit cards individually and in bulk.
 - Review pasted import candidates before saving.
 - Flashcards and basic quiz work across card types.
 - View progress; definition edits preserve progress.
 - Usable on mobile and desktop.
-- Don't store real data until auth, RLS, and the dedicated backend are configured and tested.
+- Keep real data local until persistence, export/backup, and security are implemented and tested.

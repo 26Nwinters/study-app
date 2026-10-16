@@ -6,9 +6,21 @@
     <meta name="theme-color" content="#111812" />
     <meta name="description" content="A private, ad-free study space built around your learning." />
     <title>Study Space</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #111712; color: #e7ece5; font-family: system-ui, sans-serif; }
+      .boot-message { max-width: 560px; margin: 12vh auto; padding: 24px; }
+      .boot-message h1 { font-size: 26px; }
+      .boot-message p { color: #a7b2a5; line-height: 1.6; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="boot-message">
+        <p>STUDY SPACE</p>
+        <h1>Opening your study space…</h1>
+        <p>If this message never changes, the app's JavaScript did not start. That gives us a useful clue for troubleshooting.</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

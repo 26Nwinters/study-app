@@ -4,7 +4,7 @@ import { Activity, ArrowLeft, ArrowRight, BookOpen, Brain, Check, CheckCheck, Ch
 const STORAGE_KEY = 'study-space-data-v2';
 const modes = [
   { name: 'Flashcards', detail: 'Flip through your set', Icon: Layers3, tint: 'green' },
-  { name: 'Learn', detail: 'Adaptive recall practice', Icon: Brain, tint: 'purple' },
+  { name: 'Learn', detail: 'Recall and review due cards', Icon: Brain, tint: 'purple' },
   { name: 'Match', detail: 'Pair terms and meanings', Icon: Grid2X2, tint: 'orange' },
   { name: 'Quiz', detail: 'Test what you know', Icon: ListChecks, tint: 'blue' },
   { name: 'Write', detail: 'Type answers from memory', Icon: Keyboard, tint: 'purple' },
@@ -128,8 +128,8 @@ export default function App() {
     setModal('');
   }
   function removeCard(setId, cardId) { if (!window.confirm('Delete this card and its study history?')) return; patchSet(setId, s => ({ ...s, cards: s.cards.filter(c => c.id !== cardId) })); setSelectedCards(p => p.filter(id => id !== cardId)); notify('Card deleted.'); }
-  function removeSet(id) { const s = sets.find(x => x.id === id); if (!s || !window.confirm('Permanently delete "' + s.title + '" and its cards? Export a backup first if you may need it.')) return; setData(p => ({ ...p, sets: p.sets.filter(x => x.id !== id) })); setSelectedId(null); notify('Study set deleted.'); }
-  function archiveSet(id) { patchSet(id, s => ({ ...s, archived: true })); setSelectedId(null); notify('Set archived. Restore it in Settings.'); }
+  function removeSet(id) { const s = sets.find(x => x.id === id); if (!s || !window.confirm('Permanently delete "' + s.title + '" and its cards? Export a backup first if you may need it.')) return; setData(p => ({ ...p, sets: p.sets.filter(x => x.id !== id) })); setSelectedId(null); setNav('Library'); setSelectedCards([]); notify('Study set deleted.'); }
+  function archiveSet(id) { patchSet(id, s => ({ ...s, archived: true })); setSelectedId(null); setNav('Library'); setSelectedCards([]); notify('Set archived. Restore it in Settings.'); }
   function restoreSet(id) { patchSet(id, s => ({ ...s, archived: false })); notify('Set restored.'); }
   function markProgress(c, isCorrect) {
     const setId = c.setId || study?.setIds?.find(id => sets.find(s => s.id === id)?.cards.some(x => x.id === c.id));

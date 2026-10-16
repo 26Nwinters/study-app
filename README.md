@@ -4,7 +4,7 @@ A private, ad-free study platform designed for one learner, with a flexible libr
 
 > The product name is intentionally undecided. This repository name is temporary.
 
-## First release
+## First release goals
 
 - Library organized into subjects and study sets
 - Flexible term/definition and question/answer cards
@@ -13,7 +13,7 @@ A private, ad-free study platform designed for one learner, with a flexible libr
 - Flashcards and configurable quizzes
 - Per-card and per-set progress tracking
 - Responsive dark forest-inspired interface
-- Private authentication and row-level database security before any real data is stored
+- Local persistence and export/backup before any real study data is relied on
 
 ## Planned study modes
 
@@ -28,11 +28,17 @@ A private, ad-free study platform designed for one learner, with a flexible libr
 
 The first build focuses on the core library, card editor, safe import flow, flashcards, and a basic quiz. The remaining modes are planned follow-up phases.
 
+## Cost rule
+
+**Hard limit: $0 spending.** Do not create cloud projects, paid resources, paid trials, usage-based services, or hosting resources. Do not upgrade plans or enable billing. If a step has any possibility of causing a charge, stop and discuss it first.
+
+For now, develop and test locally. The app is a prototype, and its current sample data is not permanent. Cloud sync and remote hosting are deferred unless a genuinely no-charge approach can be established without exposing the user to billing risk.
+
 ## Tech stack
 
 - React + Vite
-- Supabase Auth and Postgres for private cloud data
-- Cloudflare Pages for hosting
+- Browser-based development and local testing
+- A future backend is not configured
 - PWA/offline support is a later phase
 
 ## Local development
@@ -44,15 +50,13 @@ npm install
 npm run dev
 ```
 
-Create a local `.env` file from `.env.example` when Supabase is configured. Never put a Supabase service-role key or other secret in frontend code.
-
 ## Security and privacy
 
 - This repository must remain private.
 - No public sign-up or public sharing is planned.
 - Never commit real study records, passwords, API keys, or production secrets.
-- Database tables exposed through the Supabase Data API must have row-level security enabled and ownership-aware policies.
-- Existing Supabase projects are not used by this app. A separate project will be configured for it.
+- Keep local environment files out of Git.
+- Do not store real study data remotely until privacy, access control, backups, and costs have been reviewed.
 
 ## Product specification
 

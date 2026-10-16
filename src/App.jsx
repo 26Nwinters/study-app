@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, ArrowRight, BookOpen, Brain, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Copy, Download, FileText, Flame, Folder, Grid2X2, Layers3, Leaf, Library, ListChecks, Menu, MoreHorizontal, Plus, Search, Settings2, Sparkles, Target, X, Pencil, RotateCcw, Archive, Tag, Keyboard, Trophy, BarChart3, BookMarked, Shuffle, Save, AlertTriangle, CheckCircle2, Trash2, Upload } from 'lucide-react';
+import { supabase } from './lib/supabase.js';
+import { Activity, ArrowLeft, ArrowRight, BookOpen, Brain, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Copy, Download, FileText, Flame, Folder, Grid2X2, Layers3, Leaf, Library, ListChecks, Menu, MoreHorizontal, Plus, Search, Settings2, Sparkles, Target, X, Pencil, RotateCcw, Archive, Tag, Keyboard, Trophy, BarChart3, BookMarked, Shuffle, Save, AlertTriangle, CheckCircle2, Trash2, Upload, LogOut, Cloud, CloudOff, LockKeyhole } from 'lucide-react';
 
 const STORAGE_KEY = 'study-space-data-v2';
 const modes = [
@@ -43,6 +44,49 @@ function readData() {
   } catch (error) { console.warn('Could not read saved study data', error); }
   return initialData();
 }
+
+function mergeStudyData(cloudData, localData) {
+  const cloud = cloudData && Array.isArray(cloudData.sets) ? cloudData : null;
+  const local = localData && Array.isArray(localData.sets) ? localData : null;
+  if (!cloud) return local || initialData();
+  if (!local) return cloud;
+
+  const mergedSets = cloud.sets.map(s => ({ ...s, cards: [...(s.cards || [])] }));
+  for (const localSet of local.sets) {
+    const match = mergedSets.find(s => s.id === localSet.id ||
+      (norm(s.subject) === norm(localSet.subject) && norm(s.title) === norm(localSet.title)));
+    if (!match) {
+      mergedSets.push(localSet);
+      continue;
+    }
+    const cards = [...(match.cards || [])];
+    for (const localCard of (localSet.cards || [])) {
+      const sameId = cards.findIndex(c => c.id === localCard.id);
+      if (sameId >= 0) {
+        cards[sameId] = localCard;
+        continue;
+      }
+      const sameTerm = cards.some(c => norm(c.term) === norm(localCard.term));
+      if (!sameTerm) cards.push(localCard);
+    }
+    Object.assign(match, localSet, { cards });
+  }
+
+  const sessionsById = new Map();
+  [...(cloud.sessions || []), ...(local.sessions || [])].forEach(s => sessionsById.set(s.id, s));
+  const cloudDate = cloud.streak?.lastDate || '';
+  const localDate = local.streak?.lastDate || '';
+  return {
+    ...cloud,
+    ...local,
+    version: Math.max(cloud.version || 1, local.version || 1),
+    settings: { ...(cloud.settings || {}), ...(local.settings || {}) },
+    sets: mergedSets,
+    sessions: [...sessionsById.values()].sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || ''))).slice(0, 500),
+    streak: localDate >= cloudDate ? (local.streak || cloud.streak) : (cloud.streak || local.streak),
+  };
+}
+
 const norm = value => String(value || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\([^)]*\)/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
 const due = c => !c.progress?.nextReview || new Date(c.progress.nextReview).getTime() <= Date.now();
 const dateLabel = value => {
@@ -60,6 +104,14 @@ const shuffle = items => [...items].sort(() => Math.random() - 0.5);
 
 export default function App() {
   const [data, setData] = useState(readData);
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [syncInitialized, setSyncInitialized] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('signed-out');
   const [nav, setNav] = useState('Overview');
   const [query, setQuery] = useState('');
   const [screen, setScreen] = useState('home');
@@ -92,6 +144,114 @@ export default function App() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
     catch { setNotice('Browser storage is full. Export a backup and remove large attachments or old sets.'); }
   }, [data]);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data: sessionData, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setUser(sessionData?.session?.user || null);
+      setAuthReady(true);
+    });
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      setAuthReady(true);
+      if (!session) {
+        setSyncInitialized(false);
+        setSyncStatus('signed-out');
+      }
+    });
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user) {
+      setSyncInitialized(false);
+      setSyncStatus('signed-out');
+      return;
+    }
+    let cancelled = false;
+    setSyncInitialized(false);
+    setSyncStatus('loading');
+    (async () => {
+      const { data: row, error } = await supabase
+        .from('study_user_data')
+        .select('data')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        setSyncStatus('error');
+        setNotice('Cloud sync could not load. Your browser copy is still available. ' + error.message);
+        setSyncInitialized(true);
+        return;
+      }
+      const merged = row?.data ? mergeStudyData(row.data, data) : data;
+      setData(merged);
+      if (!row?.data || JSON.stringify(merged) !== JSON.stringify(row.data)) {
+        const { error: saveError } = await supabase.from('study_user_data').upsert({
+          user_id: user.id,
+          data: merged,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+        if (cancelled) return;
+        if (saveError) {
+          setSyncStatus('error');
+          setNotice('Your data is still on this device, but the first cloud save failed. ' + saveError.message);
+        } else {
+          setSyncStatus('saved');
+        }
+      } else {
+        setSyncStatus('saved');
+      }
+      setSyncInitialized(true);
+    })().catch(error => {
+      if (cancelled) return;
+      setSyncStatus('error');
+      setNotice('Cloud sync failed. Your browser copy is still available. ' + (error?.message || 'Unknown error'));
+      setSyncInitialized(true);
+    });
+    return () => { cancelled = true; };
+  }, [authReady, user?.id]);
+
+  useEffect(() => {
+    if (!user || !syncInitialized) return;
+    setSyncStatus('saving');
+    const timer = window.setTimeout(async () => {
+      const { error } = await supabase.from('study_user_data').upsert({
+        user_id: user.id,
+        data,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      setSyncStatus(error ? 'error' : 'saved');
+      if (error) setNotice('Cloud save failed. Your changes remain on this device. ' + error.message);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [data, user?.id, syncInitialized]);
+
+  async function handleSignIn(event) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError('');
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail.trim(),
+      password: authPassword,
+    });
+    if (error) setAuthError(error.message);
+    else setAuthPassword('');
+    setAuthBusy(false);
+  }
+
+  async function handleSignOut() {
+    setAuthBusy(true);
+    const { error } = await supabase.auth.signOut();
+    if (error) setAuthError(error.message);
+    setAuthBusy(false);
+  }
 
   const sets = data.sets || [];
   const activeSets = sets.filter(s => !s.archived);
@@ -289,6 +449,10 @@ export default function App() {
     </div>;
   }
 
+  if (!authReady) return <div className="auth-screen"><div className="auth-card"><div className="auth-mark"><Leaf size={24}/></div><p className="section-kicker">STUDY SPACE</p><h1>Opening your study space</h1><p>Checking your private session…</p></div></div>;
+  if (user && !syncInitialized) return <div className="auth-screen"><div className="auth-card"><div className="auth-mark"><Cloud size={24}/></div><p className="section-kicker">PRIVATE CLOUD SYNC</p><h1>Loading your library</h1><p>Your study data is being loaded securely.</p></div></div>;
+  if (!user) return <div className="auth-screen"><div className="auth-card"><div className="auth-mark"><Leaf size={24}/></div><p className="section-kicker">STUDY SPACE · PRIVATE ACCESS</p><h1>Welcome back.</h1><p>Sign in to open your study library and sync it across devices.</p><form className="auth-form" onSubmit={handleSignIn}><label className="field-label">Email address<input type="email" autoComplete="username" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} required placeholder="Zero’s email"/></label><label className="field-label">Password<input type="password" autoComplete="current-password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} required placeholder="Your password"/></label>{authError && <p className="auth-error" role="alert">{authError}</p>}<button className="primary-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Signing in…' : 'Sign in securely'}</button></form><div className="auth-note"><LockKeyhole size={15}/><span>No public account creation. Create the learner account in Supabase Authentication first, then sign in here.</span></div></div></div>;
+
   return <div className="app-shell">
     <aside className={'sidebar ' + (mobileMenu ? 'sidebar-open' : '')}>
       <div className="brand"><div className="brand-mark"><Leaf size={19}/></div><div className="brand-copy"><strong>Study Space</strong><span>YOUR QUIET CORNER</span></div><button className="close-mobile icon-button" onClick={() => setMobileMenu(false)} aria-label="Close menu"><X size={18}/></button></div>
@@ -297,11 +461,11 @@ export default function App() {
       <nav className="main-nav">{[['Overview',Activity],['Library',Library],['Review',Target],['Progress',BarChart3]].map(([label,Icon])=><button key={label} className={'nav-item '+(nav===label?'active':'')} onClick={() => navigate(label)}><Icon size={18}/><span>{label}</span>{label==='Review' && <span className="nav-count">{dueCards.length}</span>}</button>)}</nav>
       <div className="nav-label subject-label">YOUR SUBJECTS <button className="tiny-plus" onClick={() => openSetEditor()} aria-label="Add subject or set"><Plus size={14}/></button></div>
       <div className="subject-list">{subjects.map((s,i)=><button key={s} className="subject-item" onClick={() => { setSubjectFilter(s); setNav('Library'); }}><span className={'subject-dot '+(['green-dot','gold-dot','blue-dot'][i%3])}/><span>{s}</span><span className="subject-count">{activeSets.filter(x => x.subject === s).length}</span></button>)}<button className="subject-item muted-subject" onClick={() => openSetEditor()}><Plus size={14}/><span>Add a subject</span></button></div>
-      <div className="sidebar-bottom"><div className="streak-card"><div className="streak-icon"><Flame size={18}/></div><div><strong>{data.streak?.days || 0} day streak</strong><p>Little and often works.</p></div></div><button className="nav-item settings-item" onClick={() => { setSettingsDraft(data.settings); setModal('settings'); }}><Settings2 size={18}/><span>Settings & backup</span></button><div className="sidebar-user"><div className="avatar avatar-small">Z</div><div><strong>Zero</strong><small>Private · this device</small></div><span className="online-dot"/></div></div>
+      <div className="sidebar-bottom"><div className="streak-card"><div className="streak-icon"><Flame size={18}/></div><div><strong>{data.streak?.days || 0} day streak</strong><p>Little and often works.</p></div></div><button className="nav-item settings-item" onClick={() => { setSettingsDraft(data.settings); setModal('settings'); }}><Settings2 size={18}/><span>Settings & backup</span></button><div className="sidebar-user"><div className="avatar avatar-small">Z</div><div><strong>Zero</strong><small>{user?.email || 'Private account'}</small></div><span className="online-dot"/></div></div>
     </aside>
     {mobileMenu && <button className="scrim" onClick={() => setMobileMenu(false)} aria-label="Close navigation"/>}
     <main className="main-area">
-      <header className="topbar"><div className="topbar-left"><button className="menu-button icon-button" onClick={() => setMobileMenu(true)} aria-label="Open menu"><Menu size={20}/></button><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{nav}</strong></div></div><div className="topbar-actions"><label className="searchbox"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search your library..."/><kbd>⌘ K</kbd></label><button className="icon-button top-action" aria-label="Export backup" onClick={exportBackup}><Download size={18}/></button><div className="top-avatar">Z</div></div></header>
+      <header className="topbar"><div className="topbar-left"><button className="menu-button icon-button" onClick={() => setMobileMenu(true)} aria-label="Open menu"><Menu size={20}/></button><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{nav}</strong></div></div><div className="topbar-actions"><label className="searchbox"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search your library..."/><kbd>⌘ K</kbd></label><button className="icon-button top-action" aria-label="Export backup" onClick={exportBackup}><Download size={18}/></button><div className={'sync-indicator '+syncStatus} title={syncStatus==='saved'?'Cloud sync saved':syncStatus==='saving'?'Saving to cloud':syncStatus==='error'?'Cloud sync error':syncStatus==='loading'?'Loading cloud data':'Signed out'}>{syncStatus==='error'?<CloudOff size={15}/>:<Cloud size={15}/>}<span>{syncStatus==='saved'?'Synced':syncStatus==='saving'?'Saving':syncStatus==='loading'?'Syncing':syncStatus==='error'?'Sync issue':'Offline'}</span></div><button className="icon-button top-action" onClick={handleSignOut} aria-label="Sign out" title="Sign out"><LogOut size={17}/></button><div className="top-avatar">Z</div></div></header>
       <div className="page-content">
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss"><X size={15}/></button></div>}
         {nav === 'Overview' && <><section className="welcome-row"><div><div className="date-label"><span className="live-dot"/> YOUR LEARNING SPACE</div><h1>A quieter way to learn.</h1><p className="welcome-subtitle">Pick up where you left off, or start with something small.</p></div><button className="primary-button new-set-button" onClick={() => openSetEditor()}><Plus size={17}/> New study set</button></section>
@@ -311,7 +475,7 @@ export default function App() {
         {nav === 'Library' && <section className="section-block library-section"><div className="section-heading"><div><div className="section-kicker">YOUR COLLECTION</div><h2>Study library</h2><p className="welcome-subtitle">Create, edit, combine, import, and organize your cards.</p></div><button className="primary-button" onClick={() => openSetEditor()}><Plus size={16}/> New set</button></div><div className="library-toolbar"><select value={subjectFilter} onChange={e=>setSubjectFilter(e.target.value)}><option>All subjects</option>{subjects.map(s=><option key={s}>{s}</option>)}</select><button className="secondary-button" onClick={() => { if (!selectedId) notify('Open a set first to import cards.'); else openImport(selectedId); }}><Upload size={15}/> Import cards</button><button className="secondary-button" onClick={() => { if (!selectedSet) notify('Open a set first to bulk add cards.'); else setModal('bulk'); }}><Layers3 size={15}/> Bulk add</button>{selectedSetIds.length>0 && <button className="primary-button" onClick={() => startMode('Flashcards',selectedSetIds)}><Layers3 size={15}/> Study {selectedSetIds.length} selected sets</button>}</div><div className="set-list">{filteredSets.map(s=><article className="set-row" key={s.id}><input type="checkbox" aria-label={'Select set '+s.title+' for combined study'} checked={selectedSetIds.includes(s.id)} onChange={e=>setSelectedSetIds(p=>e.target.checked?[...p,s.id]:p.filter(id=>id!==s.id))}/><button className={'set-cover '+s.color} onClick={() => { setSelectedId(s.id); setNav('Set'); }}><Folder size={22}/><span className="cover-lines"><i/><i/><i/></span></button><button className="set-details" onClick={() => { setSelectedId(s.id); setSelectedCards([]); setNav('Set'); }}><span className="set-subject">{s.subject}</span><strong>{s.title}</strong><span className="set-description">{s.description}</span></button><div className="set-card-count"><strong>{s.cards.length}</strong><span>cards</span></div><div className="set-progress"><div className="progress-label"><span>Familiarity</span><strong>{s.cards.length ? Math.round(s.cards.reduce((n,c)=>n+(c.progress?.mastery||0),0)/s.cards.length) : 0}%</strong></div><div className="progress-track"><i style={{width:(s.cards.length ? Math.round(s.cards.reduce((n,c)=>n+(c.progress?.mastery||0),0)/s.cards.length) : 0)+'%'}}/></div><span className="last-studied">{dateLabel(s.cards.map(c=>c.progress?.lastStudied).filter(Boolean).sort().at(-1))}</span></div><button className="row-more icon-button" onClick={() => { setSelectedId(s.id); setNav('Set'); }} aria-label={'Open '+s.title}><MoreHorizontal size={19}/></button></article>)}{filteredSets.length===0 && <div className="empty-state"><Search size={22}/><strong>No sets found</strong><span>Try another search or create a set.</span></div>}</div></section>}
         {nav === 'Set' && selectedSet && <section className="section-block"><div className="section-heading"><div><button className="text-link" onClick={() => setNav('Library')}><ArrowLeft size={15}/> Back to library</button><div className="section-kicker">{selectedSet.subject}</div><h2>{selectedSet.title}</h2><p className="welcome-subtitle">{selectedSet.description}</p></div><button className="primary-button" onClick={() => openCardEditor()}><Plus size={16}/> Add card</button></div><div className="set-action-bar"><button className="secondary-button" onClick={() => startMode('Flashcards',[selectedSet.id])}><Layers3 size={15}/> Study set</button><button className="secondary-button" onClick={() => openImport(selectedSet.id)}><Upload size={15}/> Import</button><button className="secondary-button" onClick={() => { setBulkText(''); setModal('bulk'); }}><Layers3 size={15}/> Bulk add</button><button className="secondary-button" onClick={() => openSetEditor(selectedSet)}><Pencil size={15}/> Edit set</button><button className="secondary-button" onClick={() => copySet(selectedSet.id)}><Copy size={15}/> Duplicate</button><button className="secondary-button" onClick={() => exportSet(selectedSet)}><Download size={15}/> Export</button><button className="secondary-button" onClick={() => archiveSet(selectedSet.id)}><Archive size={15}/> Archive</button><button className="secondary-button danger-button" onClick={() => removeSet(selectedSet.id)}><Trash2 size={15}/> Delete</button></div><div className="card-list-heading"><span>{selectedSet.cards.length} cards</span><div><button className="text-link" onClick={() => setSelectedCards(selectedCards.length===selectedSet.cards.length?[]:selectedSet.cards.map(c=>c.id))}>{selectedCards.length===selectedSet.cards.length?'Deselect all':'Select all'}</button><button className="text-link" onClick={() => { setBulkText(''); setModal('bulk'); }}>Bulk add</button></div></div>{selectedCards.length>0 && <div className="bulk-toolbar"><span>{selectedCards.length} selected</span><div><button className="secondary-button" onClick={() => { setBulkEditDraft({ addTags: '', replaceTerm: '', withTerm: '', replaceDefinition: '', withDefinition: '', type: 'keep' }); setModal('bulk-edit'); }}><Pencil size={15}/> Bulk edit</button><button className="secondary-button danger-button" onClick={() => { if (window.confirm('Delete '+selectedCards.length+' selected cards?')) { patchSet(selectedSet.id,s=>({...s,cards:s.cards.filter(c=>!selectedCards.includes(c.id))})); setSelectedCards([]); } }}><Trash2 size={15}/> Delete selected</button></div></div>}<div className="editable-card-list">{selectedSet.cards.map((c,i)=><article className="editable-card" key={c.id}><input type="checkbox" aria-label={'Select '+c.term} checked={selectedCards.includes(c.id)} onChange={e=>setSelectedCards(p=>e.target.checked?[...p,c.id]:p.filter(id=>id!==c.id))}/><span className="card-index">{String(i+1).padStart(2,'0')}</span><div className="editable-card-copy"><strong>{c.term}</strong><p>{c.definition}</p>{c.parts && <small>{c.parts}</small>}{c.tags?.length>0 && <div className="tag-row">{c.tags.map(t=><span key={t}><Tag size={11}/>{t}</span>)}</div>}</div><div className="editable-card-progress">{c.progress?.mastery || 0}%<small>mastery</small></div><button className="icon-button" onClick={() => openCardEditor(c)} aria-label="Edit card"><Pencil size={16}/></button><button className="icon-button" onClick={() => removeCard(selectedSet.id,c.id)} aria-label="Delete card"><Trash2 size={16}/></button></article>)}{!selectedSet.cards.length && <div className="empty-state"><BookOpen size={24}/><strong>This set is ready for its first card</strong><span>Add one card or paste a whole list to get started.</span><button className="primary-button" onClick={() => openCardEditor()}><Plus size={15}/> Add card</button></div>}</div></section>}
         {nav === 'Review' && <section className="section-block"><div className="section-heading"><div><div className="section-kicker">SPACED REVIEW</div><h2>Cards ready to revisit</h2><p className="welcome-subtitle">Cards are scheduled from your answers. New cards are due until you practice them.</p></div><button className="primary-button" disabled={!dueCards.length} onClick={() => startMode('Learn', [...new Set(dueCards.map(c=>c.setId))])}><Brain size={16}/> Start review</button></div><div className="editable-card-list">{dueCards.map(c=><article className="editable-card" key={c.id}><span className="card-index"><Clock3 size={15}/></span><div className="editable-card-copy"><strong>{c.term}</strong><p>{c.definition}</p><small>{c.setTitle} · {c.progress?.incorrect || 0} missed</small></div><span className="review-due">Due now</span><button className="secondary-button" onClick={() => { setSelectedId(c.setId); startMode('Flashcards',[c.setId]); }}>Study</button></article>)}{!dueCards.length && <div className="empty-state"><CheckCircle2 size={25}/><strong>You're all caught up</strong><span>There are no cards due right now. Keep going when you're ready.</span></div>}</div></section>}
-        {nav === 'Progress' && <section className="section-block"><div className="section-heading"><div><div className="section-kicker">YOUR LEARNING HISTORY</div><h2>Progress, at your pace.</h2><p className="welcome-subtitle">Everything is stored locally in this browser.</p></div><button className="secondary-button" onClick={exportBackup}><Download size={15}/> Export backup</button></div><section className="stats-grid"><div className="stat-card"><div className="stat-label">TOTAL CARDS</div><div className="stat-value">{allCards.length}</div></div><div className="stat-card"><div className="stat-label">CARDS STUDIED</div><div className="stat-value">{studiedCards.length}</div></div><div className="stat-card"><div className="stat-label">AVERAGE MASTERY</div><div className="stat-value">{averageMastery}%</div></div></section><h3 className="subsection-title">Recent sessions</h3><div className="session-history">{(data.sessions || []).slice(0,20).map(s=><article className="session-row" key={s.id}><div className="mode-icon green"><Activity size={17}/></div><div><strong>{s.mode}</strong><small>{s.setIds.map(id=>sets.find(x=>x.id===id)?.title).filter(Boolean).join(', ') || 'Study session'} · {dateLabel(s.completedAt)}</small></div><span>{s.correct}/{s.total} correct</span><small>{Math.max(1,Math.round((s.durationSeconds||0)/60))} min</small></article>)}{!(data.sessions || []).length && <div className="empty-state"><BarChart3 size={23}/><strong>Your history starts with your first completed session</strong><span>Practice a few cards and your results will appear here.</span></div>}</div><h3 className="subsection-title">Archived sets</h3>{sets.filter(s=>s.archived).map(s=><article className="session-row" key={s.id}><div><strong>{s.title}</strong><small>{s.subject} · {s.cards.length} cards</small></div><button className="secondary-button" onClick={() => restoreSet(s.id)}>Restore</button></article>)}</section>}
+        {nav === 'Progress' && <section className="section-block"><div className="section-heading"><div><div className="section-kicker">YOUR LEARNING HISTORY</div><h2>Progress, at your pace.</h2><p className="welcome-subtitle">Your study sets and progress sync to your private account and remain backed up in this browser.</p></div><button className="secondary-button" onClick={exportBackup}><Download size={15}/> Export backup</button></div><section className="stats-grid"><div className="stat-card"><div className="stat-label">TOTAL CARDS</div><div className="stat-value">{allCards.length}</div></div><div className="stat-card"><div className="stat-label">CARDS STUDIED</div><div className="stat-value">{studiedCards.length}</div></div><div className="stat-card"><div className="stat-label">AVERAGE MASTERY</div><div className="stat-value">{averageMastery}%</div></div></section><h3 className="subsection-title">Recent sessions</h3><div className="session-history">{(data.sessions || []).slice(0,20).map(s=><article className="session-row" key={s.id}><div className="mode-icon green"><Activity size={17}/></div><div><strong>{s.mode}</strong><small>{s.setIds.map(id=>sets.find(x=>x.id===id)?.title).filter(Boolean).join(', ') || 'Study session'} · {dateLabel(s.completedAt)}</small></div><span>{s.correct}/{s.total} correct</span><small>{Math.max(1,Math.round((s.durationSeconds||0)/60))} min</small></article>)}{!(data.sessions || []).length && <div className="empty-state"><BarChart3 size={23}/><strong>Your history starts with your first completed session</strong><span>Practice a few cards and your results will appear here.</span></div>}</div><h3 className="subsection-title">Archived sets</h3>{sets.filter(s=>s.archived).map(s=><article className="session-row" key={s.id}><div><strong>{s.title}</strong><small>{s.subject} · {s.cards.length} cards</small></div><button className="secondary-button" onClick={() => restoreSet(s.id)}>Restore</button></article>)}</section>}
         {nav !== 'Overview' && nav !== 'Library' && nav !== 'Set' && nav !== 'Review' && nav !== 'Progress' && <section className="section-block"><h2>{nav}</h2><p>Choose a section from the sidebar.</p></section>}
         {nav === 'Overview' && <section className="section-block library-section"><div className="section-heading"><div><div className="section-kicker">PICK UP WHERE YOU LEFT OFF</div><h2>Recently added sets</h2></div><button className="text-link" onClick={() => navigate('Library')}>View library <ArrowRight size={15}/></button></div><div className="set-list">{filteredSets.slice(0,5).map(s=><article className="set-row" key={s.id}><button className={'set-cover '+s.color} onClick={() => { setSelectedId(s.id); setNav('Set'); }}><Folder size={22}/><span className="cover-lines"><i/><i/><i/></span></button><button className="set-details" onClick={() => { setSelectedId(s.id); setNav('Set'); }}><span className="set-subject">{s.subject}</span><strong>{s.title}</strong><span className="set-description">{s.description}</span></button><div className="set-card-count"><strong>{s.cards.length}</strong><span>cards</span></div><button className="secondary-button" onClick={() => { setSelectedId(s.id); startMode('Flashcards',[s.id]); }}>Study</button></article>)}</div></section>}
         <footer className="page-footer"><span><Leaf size={14}/> A little progress is still progress.</span><span>PRIVATE BY DESIGN · NO ADS, EVER</span></footer>
@@ -325,7 +489,7 @@ export default function App() {
       {modal==='review-import' && <><p className="modal-copy">Nothing changes until you confirm below. Similar terms are flagged for your decision.</p><div className="import-summary"><span>{candidates.filter(c=>c.status==='New').length} new</span><span>{candidates.filter(c=>c.status==='Duplicate').length} duplicates</span><span>{candidates.filter(c=>c.status==='Definition Changed').length} changed definitions</span></div><div className="import-filters">{['All','New','Duplicate','Definition Changed'].map(f=><button key={f} className={importFilter===f?'filter-chip selected':'filter-chip'} onClick={()=>setImportFilter(f)}>{f}</button>)}</div><div className="import-review-list">{candidates.filter(c=>importFilter==='All'||c.status===importFilter).map(c=><div className="import-review-row" key={c.key}><div><span className={'status-pill '+(c.status==='New'?'status-new':c.status==='Duplicate'?'status-duplicate':'status-changed')}>{c.status}</span><strong>{c.term}</strong><p>{c.definition}</p>{c.existingId && <small>Existing: {sets.find(s=>s.id===importSetId)?.cards.find(x=>x.id===c.existingId)?.definition}</small>}{c.batchDefinition && <small>Earlier in this import: {c.batchDefinition}</small>}</div><select value={c.action} onChange={e=>setCandidateAction(c.key,e.target.value)}><option value="add">Add as new</option><option value="skip">Skip</option>{c.existingId && <><option value="replace">Replace existing definition</option><option value="both">Keep both</option></>}</select></div>)}</div><div className="modal-actions"><button className="secondary-button" onClick={()=>setModal('import')}>Back</button><button className="primary-button" onClick={applyImport}><Check size={15}/> Apply selected changes</button></div></>}
       {modal==='bulk-edit' && <form onSubmit={bulkEditApply}><p className="modal-copy">Apply changes to {selectedCards.length} selected cards. Leave fields blank to keep existing text. Replacements are case-sensitive and study history is preserved.</p><label className="field-label">Add tags to all selected cards<input value={bulkEditDraft.addTags} onChange={e=>setBulkEditDraft(p=>({...p,addTags:e.target.value}))} placeholder="exam review, priority"/></label><label className="field-label">Replace text in terms<input value={bulkEditDraft.replaceTerm} onChange={e=>setBulkEditDraft(p=>({...p,replaceTerm:e.target.value}))} placeholder="Text to find"/></label><label className="field-label">Replace with<input value={bulkEditDraft.withTerm} onChange={e=>setBulkEditDraft(p=>({...p,withTerm:e.target.value}))} placeholder="Replacement text"/></label><label className="field-label">Replace text in definitions<input value={bulkEditDraft.replaceDefinition} onChange={e=>setBulkEditDraft(p=>({...p,replaceDefinition:e.target.value}))} placeholder="Text to find"/></label><label className="field-label">Replace with<input value={bulkEditDraft.withDefinition} onChange={e=>setBulkEditDraft(p=>({...p,withDefinition:e.target.value}))} placeholder="Replacement text"/></label><label className="field-label">Set card type<select value={bulkEditDraft.type} onChange={e=>setBulkEditDraft(p=>({...p,type:e.target.value}))}><option value="keep">Keep current type</option><option value="term">Term / definition</option><option value="question">Question / answer</option><option value="equation">Equation / solution</option><option value="fill">Fill in the blank</option><option value="word-part">Word part</option><option value="multi-step">Multi-step problem</option><option value="custom">Custom long answer</option></select></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={()=>setModal('')}>Cancel</button><button type="submit" className="primary-button"><Save size={15}/> Apply bulk edit</button></div></form>}
       {modal==='bulk' && <><p className="modal-copy">Paste many cards at once. Format: term, tab, definition. Existing terms are skipped; use Import for a full duplicate review.</p><label className="field-label">Paste rows<textarea autoFocus rows={10} value={bulkText} onChange={e=>setBulkText(e.target.value)} placeholder={'cardi/o\\tHeart\\nhepat/o\\tLiver\\n-itis\\tInflammation'}/></label><div className="modal-actions"><button className="secondary-button" onClick={()=>setModal('')}>Cancel</button><button className="primary-button" onClick={bulkApply}><Plus size={15}/> Add new cards</button></div></>}
-      {modal==='settings' && <><p className="modal-copy">This build stores data in this browser only. No account or cloud service is connected. Export backups regularly, especially before clearing browser data.</p><label className="field-label">Spelling tolerance<select value={settingsDraft.spellingTolerance} onChange={e=>setSettingsDraft(p=>({...p,spellingTolerance:e.target.value}))}><option value="strict">Strict</option><option value="balanced">Balanced</option><option value="lenient">Lenient</option></select></label><label className="field-label">Daily card goal<input type="number" min="1" max="500" value={settingsDraft.dailyGoal} onChange={e=>setSettingsDraft(p=>({...p,dailyGoal:Number(e.target.value)}))}/></label><div className="settings-actions"><button className="secondary-button" onClick={exportBackup}><Download size={15}/> Export full backup</button><label className="secondary-button file-button"><Upload size={15}/> Restore backup<input type="file" accept=".json,application/json" onChange={importBackup}/></label><button className="secondary-button" onClick={()=>downloadText('study-space-export.txt',activeSets.map(s=>'# '+s.subject+' / '+s.title+'\\n'+s.cards.map(c=>c.term+'\\t'+c.definition).join('\\n')).join('\\n\\n'))}><FileText size={15}/> Export all cards</button></div><h3 className="subsection-title">Archived sets</h3>{sets.filter(s=>s.archived).map(s=><div className="session-row" key={s.id}><div><strong>{s.title}</strong><small>{s.subject}</small></div><button className="secondary-button" onClick={()=>restoreSet(s.id)}>Restore</button></div>)}<div className="modal-actions"><button className="secondary-button danger-button" onClick={()=>{if(window.confirm('Delete all local study data? Export a backup first.')){const fresh=initialData();setData(fresh);setSelectedId(null);setNav('Overview');setModal('');notify('Local data reset to starter content.');}}}><Trash2 size={15}/> Reset all data</button><button className="primary-button" onClick={()=>{setData(p=>({...p,settings:settingsDraft}));setModal('');notify('Settings saved.');}}><Save size={15}/> Save settings</button></div></>}
+      {modal==='settings' && <><p className="modal-copy">Study data syncs to your private Supabase account and is also kept in this browser. Export backups regularly. If cloud sync shows an error, keep this browser data until sync is repaired.</p><label className="field-label">Spelling tolerance<select value={settingsDraft.spellingTolerance} onChange={e=>setSettingsDraft(p=>({...p,spellingTolerance:e.target.value}))}><option value="strict">Strict</option><option value="balanced">Balanced</option><option value="lenient">Lenient</option></select></label><label className="field-label">Daily card goal<input type="number" min="1" max="500" value={settingsDraft.dailyGoal} onChange={e=>setSettingsDraft(p=>({...p,dailyGoal:Number(e.target.value)}))}/></label><div className="settings-actions"><button className="secondary-button" onClick={exportBackup}><Download size={15}/> Export full backup</button><label className="secondary-button file-button"><Upload size={15}/> Restore backup<input type="file" accept=".json,application/json" onChange={importBackup}/></label><button className="secondary-button" onClick={()=>downloadText('study-space-export.txt',activeSets.map(s=>'# '+s.subject+' / '+s.title+'\\n'+s.cards.map(c=>c.term+'\\t'+c.definition).join('\\n')).join('\\n\\n'))}><FileText size={15}/> Export all cards</button></div><h3 className="subsection-title">Archived sets</h3>{sets.filter(s=>s.archived).map(s=><div className="session-row" key={s.id}><div><strong>{s.title}</strong><small>{s.subject}</small></div><button className="secondary-button" onClick={()=>restoreSet(s.id)}>Restore</button></div>)}<div className="modal-actions"><button className="secondary-button danger-button" onClick={()=>{if(window.confirm('Delete all local study data? Export a backup first.')){const fresh=initialData();setData(fresh);setSelectedId(null);setNav('Overview');setModal('');notify('Local data reset to starter content.');}}}><Trash2 size={15}/> Reset all data</button><button className="primary-button" onClick={()=>{setData(p=>({...p,settings:settingsDraft}));setModal('');notify('Settings saved.');}}><Save size={15}/> Save settings</button></div></>}
     </div></div>}
   </div>;
 }

@@ -124,3 +124,23 @@ If a backend is considered in the future, first review current pricing, billing 
 - View progress; definition edits preserve progress.
 - Usable on mobile and desktop.
 - Keep real data local until persistence, export/backup, and security are implemented and tested.
+
+
+## Implementation status (2026-10-16)
+
+Implemented in the current local-first app:
+- Subject/set library, search, subject filtering, set create/edit/archive/restore/duplicate/delete/export.
+- Flexible card types and individual card editing.
+- Bulk card add, bulk editing of selected cards, bulk delete, and combined study sessions across selected sets.
+- Pasted text import with duplicate and changed-definition review. Existing definitions are not replaced without an explicit choice.
+- Flashcards, typed recall, multiple-choice quiz with configurable question count, matching, word-part review, challenge practice, progress history, and due-card review.
+- Local browser persistence, JSON backup/restore, and text export.
+
+Not yet release-ready:
+- A production build has not been run in this environment, so source syntax and runtime behavior still need to be verified with npm install and npm run build locally.
+- Automated tests are not in place. Import edge cases, matching interactions, and backup restoration need manual and automated verification.
+- Learn is a basic typed-recall foundation, not a fully adaptive spaced-learning engine. Matching and answer tolerance need more testing.
+- Photo OCR, document import, audio/pronunciation, diagram labeling, advanced math checking, PWA packaging, authentication, and cloud sync remain future work.
+- The current app stores data only in the browser's localStorage. It is not yet safe to deploy publicly with private learner data.
+
+Cost rule: use free local tools wherever possible. If a step may incur a charge, stop and choose a free alternative rather than knowingly proceeding.

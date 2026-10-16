@@ -237,20 +237,30 @@ export default function App() {
     event.preventDefault();
     setAuthBusy(true);
     setAuthError('');
-    const { error } = await supabase.auth.signInWithPassword({
-      email: authEmail.trim(),
-      password: authPassword,
-    });
-    if (error) setAuthError(error.message);
-    else setAuthPassword('');
-    setAuthBusy(false);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) setAuthError(error.message);
+      else setAuthPassword('');
+    } catch (error) {
+      setAuthError(error?.message || 'Could not reach the sign-in service. Try again.');
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   async function handleSignOut() {
     setAuthBusy(true);
-    const { error } = await supabase.auth.signOut();
-    if (error) setAuthError(error.message);
-    setAuthBusy(false);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) setAuthError(error.message);
+    } catch (error) {
+      setAuthError(error?.message || 'Could not sign out. Try again.');
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   const sets = data.sets || [];
@@ -456,7 +466,7 @@ export default function App() {
   return <div className="app-shell">
     <aside className={'sidebar ' + (mobileMenu ? 'sidebar-open' : '')}>
       <div className="brand"><div className="brand-mark"><Leaf size={19}/></div><div className="brand-copy"><strong>Study Space</strong><span>YOUR QUIET CORNER</span></div><button className="close-mobile icon-button" onClick={() => setMobileMenu(false)} aria-label="Close menu"><X size={18}/></button></div>
-      <div className="profile-switch"><div className="avatar">Z</div><span><strong>Zero's learning</strong><small>Private local library</small></span><ChevronDown size={15}/></div>
+      <div className="profile-switch"><div className="avatar">Z</div><span><strong>Zero's learning</strong><small>Private cloud library</small></span><ChevronDown size={15}/></div>
       <div className="nav-label">WORKSPACE</div>
       <nav className="main-nav">{[['Overview',Activity],['Library',Library],['Review',Target],['Progress',BarChart3]].map(([label,Icon])=><button key={label} className={'nav-item '+(nav===label?'active':'')} onClick={() => navigate(label)}><Icon size={18}/><span>{label}</span>{label==='Review' && <span className="nav-count">{dueCards.length}</span>}</button>)}</nav>
       <div className="nav-label subject-label">YOUR SUBJECTS <button className="tiny-plus" onClick={() => openSetEditor()} aria-label="Add subject or set"><Plus size={14}/></button></div>

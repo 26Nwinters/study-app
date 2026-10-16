@@ -1,45 +1,29 @@
 # Private Study App
 
-A private, ad-free study platform designed for one learner, with a flexible library that can grow beyond medical terminology into languages, English, mathematics, science, and more.
+A private, ad-free study platform for one learner. It starts with medical terminology and can grow into English, mathematics, languages, science, and other subjects.
 
-> The product name is intentionally undecided. This repository name is temporary.
+The product name is intentionally undecided. This repository name is temporary.
 
-## First release goals
+## What is implemented in the current local-first build
 
-- Library organized into subjects and study sets
-- Flexible term/definition and question/answer cards
-- Individual and bulk card editing
-- Paste-based import with duplicate review before changes are applied
-- Flashcards and configurable quizzes
-- Per-card and per-set progress tracking
-- Responsive dark forest-inspired interface
-- Local persistence and export/backup before any real study data is relied on
+- Subject and study-set library with search and subject filtering
+- Create, edit, archive, restore, duplicate, export, and delete sets
+- Flexible cards for terms, questions, equations, fill-in-the-blank prompts, word parts, multi-step problems, and long answers
+- Individual card editing, selection, bulk deletion, and bulk add
+- Paste-based import using tab, `::`, or ` = ` separators
+- Import review that classifies new terms, duplicates, and changed definitions; each row must be approved or skipped before changes are applied
+- Flashcards, typed recall, quiz, matching, word-part review, challenge practice, and progress history
+- Per-card correctness, mastery estimate, last studied date, next review date, and a review queue
+- Local browser persistence, JSON backup/restore, and text export
+- Responsive dark forest-inspired interface with no ads
 
-## Planned study modes
+## Important current limitations
 
-1. Flashcards
-2. Adaptive Learn
-3. Match
-4. Quiz
-5. Write
-6. Word Builder
-7. Challenge
-8. Progress & Review
-
-The first build focuses on the core library, card editor, safe import flow, flashcards, and a basic quiz. The remaining modes are planned follow-up phases.
-
-## Cost rule
-
-**Hard limit: $0 spending.** Do not create cloud projects, paid resources, paid trials, usage-based services, or hosting resources. Do not upgrade plans or enable billing. If a step has any possibility of causing a charge, stop and discuss it first.
-
-For now, develop and test locally. The app is a prototype, and its current sample data is not permanent. Cloud sync and remote hosting are deferred unless a genuinely no-charge approach can be established without exposing the user to billing risk.
-
-## Tech stack
-
-- React + Vite
-- Browser-based development and local testing
-- A future backend is not configured
-- PWA/offline support is a later phase
+- Data stays in the current browser on the current device. There is no account system or cloud sync yet. Clearing browser data can erase study data, so export backups regularly.
+- Starter cards are examples and should be replaced with the learner's actual course material.
+- The Learn, Match, Quiz, Write, Word Builder, and Challenge modes are functional foundations, not yet a polished adaptive learning engine. Matching and spelling evaluation can be improved.
+- Photo OCR, document import, audio, diagram labeling, advanced math checking, cross-device sync, and PWA installation are not implemented yet.
+- The repository being private does not automatically make a deployed website private. Do not deploy this app publicly with real learner data until authentication and access controls are implemented and reviewed.
 
 ## Local development
 
@@ -50,14 +34,22 @@ npm install
 npm run dev
 ```
 
+Then open the local URL printed by Vite. `npm run build` creates a production build in `dist/`; `npm run preview` previews that build locally.
+
+## Cost rule
+
+**Avoid charges at all costs.** Prefer free local tools and services. If a proposed step might incur a charge, stop before taking it and find a free alternative. Do not knowingly create paid resources, start trials, upgrade plans, enable billing, or deploy to a service without checking the specific cost and access implications first.
+
+No cloud project or hosting resource is configured for this app. The unused Supabase client dependency is intentionally excluded until a free, safe sync approach is evaluated.
+
 ## Security and privacy
 
-- This repository must remain private.
+- Keep this repository private.
+- Never commit passwords, real learner records, API keys, or production secrets.
+- Do not put service-role keys or private secrets in browser code.
 - No public sign-up or public sharing is planned.
-- Never commit real study records, passwords, API keys, or production secrets.
-- Keep local environment files out of Git.
-- Do not store real study data remotely until privacy, access control, backups, and costs have been reviewed.
+- Back up local study data before clearing browser storage or changing devices.
 
 ## Product specification
 
-See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md) for the full feature plan and phased roadmap.
+See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md) for the complete product requirements and roadmap.
